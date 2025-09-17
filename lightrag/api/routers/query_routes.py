@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from lightrag.base import QueryParam
+from lightrag.utils import logger
 from ..utils_api import get_combined_auth_dependency
 from pydantic import BaseModel, Field, field_validator
 
@@ -282,10 +283,51 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 if not isinstance(metadata, dict):
                     metadata = {}
 
+                # Enrich chunks with document metadata
+                enriched_chunks = []
+                for chunk in chunks:
+                    enriched_chunk = chunk.copy()
+                    
+                    # Get document metadata from full_docs storage
+                    # First, we need to find the document ID from the chunk's full_doc_id
+                    full_doc_id = chunk.get("full_doc_id")
+                    logger.info(f"[DEBUG] Chunk keys: {chunk.keys()}")
+                    logger.info(f"[DEBUG] Processing chunk with full_doc_id: {full_doc_id}")
+                    
+                    if full_doc_id:
+                        try:
+                            # Retrieve document metadata from full_docs storage
+                            logger.info(f"[DEBUG] Attempting to retrieve document data for ID: {full_doc_id}")
+                            full_doc_data = await rag.full_docs.get_by_id(full_doc_id)
+                            logger.info(f"[DEBUG] Retrieved full_doc_data: {full_doc_data is not None}, type: {type(full_doc_data)}")
+                            
+                            if full_doc_data and isinstance(full_doc_data, dict):
+                                logger.info(f"[DEBUG] Document data keys: {list(full_doc_data.keys())}")
+                                # Add document metadata to chunk
+                                enriched_chunk["document_metadata"] = full_doc_data.get("meta", {})
+                                enriched_chunk["document_name"] = full_doc_data.get("doc_name", "")
+                                logger.info(f"[DEBUG] Added metadata: {enriched_chunk['document_metadata']}, doc_name: {enriched_chunk['document_name']}")
+                            else:
+                                logger.warning(f"[DEBUG] full_doc_data is None or not dict: {full_doc_data}")
+                                enriched_chunk["document_metadata"] = {}
+                                enriched_chunk["document_name"] = ""
+                        except Exception as e:
+                            # If we can't get metadata, add empty metadata but log the error
+                            logger.warning(f"Could not retrieve metadata for document {full_doc_id}: {e}")
+                            enriched_chunk["document_metadata"] = {}
+                            enriched_chunk["document_name"] = ""
+                    else:
+                        # No full_doc_id available
+                        logger.warning(f"[DEBUG] No full_doc_id found in chunk: {chunk.keys()}")
+                        enriched_chunk["document_metadata"] = {}
+                        enriched_chunk["document_name"] = ""
+                    
+                    enriched_chunks.append(enriched_chunk)
+
                 return QueryDataResponse(
                     entities=entities,
                     relationships=relationships,
-                    chunks=chunks,
+                    chunks=enriched_chunks,
                     metadata=metadata,
                 )
             else:

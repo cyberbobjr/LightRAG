@@ -1,0 +1,36 @@
+{
+  "name": "LightRAG",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "forwardPorts": [
+    9622
+  ],
+  "runArgs": [
+    "--gpus",
+    "all",
+    "-p",
+    "9622:9621",
+    "--network=devcontainers-net",
+    "--name=LightRAG"
+  ],
+  "mounts": [
+    "source=${localWorkspaceFolder}/.bash_history,target=/root/.bash_history,type=bind"
+  ],
+  "remoteUser": "root",
+  "postCreateCommand": "",
+  "postStartCommand": "",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.debugpy",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.vscode-python-envs",
+        "KevinRose.vsc-python-indent",
+        "openai.chatgpt",
+        "Bar.python-import-helper"
+      ]
+    }
+  }
+}

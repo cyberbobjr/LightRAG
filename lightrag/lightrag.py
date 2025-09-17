@@ -868,6 +868,7 @@ class LightRAG:
         ids: str | list[str] | None = None,
         file_paths: str | list[str] | None = None,
         track_id: str | None = None,
+        metadata: dict | list[dict] | None = None,
     ) -> str:
         """Sync Insert documents with checkpoint support
 
@@ -880,6 +881,7 @@ class LightRAG:
             ids: single string of the document ID or list of unique document IDs, if not provided, MD5 hash IDs will be generated
             file_paths: single string of the file path or list of file paths, used for citation
             track_id: tracking ID for monitoring processing status, if not provided, will be generated
+            metadata: single dict or list of metadata dicts for each document
 
         Returns:
             str: tracking ID for monitoring processing status
@@ -893,6 +895,7 @@ class LightRAG:
                 ids,
                 file_paths,
                 track_id,
+                metadata,
             )
         )
 
@@ -904,6 +907,7 @@ class LightRAG:
         ids: str | list[str] | None = None,
         file_paths: str | list[str] | None = None,
         track_id: str | None = None,
+        metadata: dict | list[dict] | None = None,
     ) -> str:
         """Async Insert documents with checkpoint support
 
@@ -916,6 +920,7 @@ class LightRAG:
             ids: list of unique document IDs, if not provided, MD5 hash IDs will be generated
             file_paths: list of file paths corresponding to each document, used for citation
             track_id: tracking ID for monitoring processing status, if not provided, will be generated
+            metadata: single dict or list of metadata dicts for each document
 
         Returns:
             str: tracking ID for monitoring processing status
@@ -924,7 +929,7 @@ class LightRAG:
         if track_id is None:
             track_id = generate_track_id("insert")
 
-        await self.apipeline_enqueue_documents(input, ids, file_paths, track_id)
+        await self.apipeline_enqueue_documents(input, ids, file_paths, track_id, metadata)
         await self.apipeline_process_enqueue_documents(
             split_by_character, split_by_character_only
         )
@@ -1009,6 +1014,7 @@ class LightRAG:
         ids: list[str] | None = None,
         file_paths: str | list[str] | None = None,
         track_id: str | None = None,
+        metadata: dict | list[dict] | None = None,
     ) -> str:
         """
         Pipeline for Processing Documents
@@ -1023,6 +1029,7 @@ class LightRAG:
             ids: list of unique document IDs, if not provided, MD5 hash IDs will be generated
             file_paths: list of file paths corresponding to each document, used for citation
             track_id: tracking ID for monitoring processing status, if not provided, will be generated with "enqueue" prefix
+            metadata: single dict or list of metadata dicts for each document
 
         Returns:
             str: tracking ID for monitoring processing status
@@ -1036,6 +1043,8 @@ class LightRAG:
             ids = [ids]
         if isinstance(file_paths, str):
             file_paths = [file_paths]
+        if isinstance(metadata, dict):
+            metadata = [metadata]
 
         # If file_paths is provided, ensure it matches the number of documents
         if file_paths is not None:
@@ -1049,6 +1058,16 @@ class LightRAG:
             # If no file paths provided, use placeholder
             file_paths = ["unknown_source"] * len(input)
 
+        # If metadata is provided, ensure it matches the number of documents
+        if metadata is not None:
+            if len(metadata) != len(input):
+                raise ValueError(
+                    "Number of metadata entries must match the number of documents"
+                )
+        else:
+            # If no metadata provided, use empty dict
+            metadata = [{}] * len(input)
+
         # 1. Validate ids if provided or generate MD5 hash IDs and remove duplicate contents
         if ids is not None:
             # Check if the number of IDs matches the number of documents
@@ -1061,31 +1080,32 @@ class LightRAG:
 
             # Generate contents dict and remove duplicates in one pass
             unique_contents = {}
-            for id_, doc, path in zip(ids, input, file_paths):
+            for id_, doc, path, meta in zip(ids, input, file_paths, metadata):
                 cleaned_content = sanitize_text_for_encoding(doc)
                 if cleaned_content not in unique_contents:
-                    unique_contents[cleaned_content] = (id_, path)
+                    unique_contents[cleaned_content] = (id_, path, meta)
 
             # Reconstruct contents with unique content
             contents = {
-                id_: {"content": content, "file_path": file_path}
-                for content, (id_, file_path) in unique_contents.items()
+                id_: {"content": content, "file_path": file_path, "metadata": meta}
+                for content, (id_, file_path, meta) in unique_contents.items()
             }
         else:
             # Clean input text and remove duplicates in one pass
-            unique_content_with_paths = {}
-            for doc, path in zip(input, file_paths):
+            unique_content_with_paths_meta = {}
+            for doc, path, meta in zip(input, file_paths, metadata):
                 cleaned_content = sanitize_text_for_encoding(doc)
-                if cleaned_content not in unique_content_with_paths:
-                    unique_content_with_paths[cleaned_content] = path
+                if cleaned_content not in unique_content_with_paths_meta:
+                    unique_content_with_paths_meta[cleaned_content] = (path, meta)
 
             # Generate contents dict of MD5 hash IDs and documents with paths
             contents = {
                 compute_mdhash_id(content, prefix="doc-"): {
                     "content": content,
                     "file_path": path,
+                    "metadata": meta,
                 }
-                for content, path in unique_content_with_paths.items()
+                for content, (path, meta) in unique_content_with_paths_meta.items()
             }
 
         # 2. Generate document initial status (without content)
@@ -1137,7 +1157,11 @@ class LightRAG:
         # 4. Store document content in full_docs and status in doc_status
         #    Store full document content separately
         full_docs_data = {
-            doc_id: {"content": contents[doc_id]["content"]}
+            doc_id: {
+                "content": contents[doc_id]["content"],
+                "meta": contents[doc_id].get("metadata", {}),
+                "doc_name": contents[doc_id].get("file_path", "")
+            }
             for doc_id in new_docs.keys()
         }
         await self.full_docs.upsert(full_docs_data)
@@ -2160,6 +2184,7 @@ class LightRAG:
                 hashing_kv=self.llm_response_cache,
                 system_prompt=None,
                 return_raw_data=True,  # Get final processed data
+                kv_store_full_docs=self.full_docs,
             )
         elif param.mode == "bypass":
             logger.debug("[aquery_data] Using bypass mode")

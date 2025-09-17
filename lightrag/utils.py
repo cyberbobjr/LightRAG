@@ -2720,6 +2720,7 @@ def _convert_to_user_format(
     query_mode: str,
     entity_id_to_original: dict = None,
     relation_id_to_original: dict = None,
+    kv_store_full_docs=None,
 ) -> dict[str, Any]:
     """Convert internal data format to user-friendly format using original database data"""
 
@@ -2806,7 +2807,11 @@ def _convert_to_user_format(
             "content": chunk.get("content", ""),
             "file_path": chunk.get("file_path", "unknown_source"),
             "chunk_id": chunk.get("chunk_id", ""),
-        }
+            "document_metadata": {},  # Initialize as empty, will be enriched below
+            "document_name": "",
+            "full_doc_id" : chunk.get("full_doc_id")
+        }       
+       
         formatted_chunks.append(chunk_data)
 
     logger.debug(

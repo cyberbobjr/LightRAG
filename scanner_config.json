@@ -1,0 +1,93 @@
+{
+  "scanner": {
+    "source_directory": "./markdowns",
+    "file_extensions": [".txt", ".md", ".pdf", ".docx", ".json"],
+    "recursive": true,
+    "exclude_patterns": ["__pycache__", ".git", ".env", "*.pyc", "*.log"],
+    "max_file_size_mb": 50
+  },
+  "lightrag": {
+    "working_dir": "./rag_storage",
+    "chunk_token_size": 1200,
+    "model_name": "gpt-4o-mini",
+    "embedding_model": "text-embedding-3-small",
+    "api_key_env": "OPENAI_API_KEY"
+  },
+  "metadata": {
+    "global_metadata": {
+      "source": "document_scanner",
+      "language": "fr",
+      "ingestion_date": null,
+      "scanner_version": "1.0",
+      "project": "knowledge_base"
+    },
+    "file_type_metadata": {
+      ".txt": {
+        "document_type": "text",
+        "format": "plain_text",
+        "priority": "standard"
+      },
+      ".md": {
+        "document_type": "markdown",
+        "format": "markdown",
+        "priority": "high"
+      },
+      ".pdf": {
+        "document_type": "document",
+        "format": "pdf",
+        "priority": "high"
+      },
+      ".json": {
+        "document_type": "data",
+        "format": "json",
+        "priority": "low"
+      },
+      ".docx": {
+        "document_type": "document",
+        "format": "word",
+        "priority": "high"
+      }
+    },
+    "path_based_metadata": {
+      "rules": [
+        {
+          "pattern": "**/legal/**",
+          "metadata": {
+            "category": "legal",
+            "confidentiality": "restricted",
+            "department": "legal"
+          }
+        },
+        {
+          "pattern": "**/public/**",
+          "metadata": {
+            "category": "public",
+            "confidentiality": "public",
+            "department": "communication"
+          }
+        },
+        {
+          "pattern": "**/technical/**",
+          "metadata": {
+            "category": "technical",
+            "confidentiality": "internal",
+            "department": "engineering"
+          }
+        },
+        {
+          "pattern": "**/manual/**",
+          "metadata": {
+            "category": "documentation",
+            "confidentiality": "public",
+            "document_type": "manual"
+          }
+        }
+      ]
+    }
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "text",
+    "file": null
+  }
+}

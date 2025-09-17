@@ -2636,7 +2636,8 @@ async def _get_vector_context(
                     "created_at": result.get("created_at", None),
                     "file_path": result.get("file_path", "unknown_source"),
                     "source_type": "vector",  # Mark the source type
-                    "chunk_id": result.get("id"),  # Add chunk_id for deduplication
+                    "chunk_id": result.get("id"),  # Add chunk_id for deduplication,
+                    "full_doc_id" : result.get("full_doc_id")
                 }
                 valid_chunks.append(chunk_with_metadata)
 
@@ -3060,6 +3061,7 @@ async def _merge_all_chunks(
                         "content": chunk["content"],
                         "file_path": chunk.get("file_path", "unknown_source"),
                         "chunk_id": chunk_id,
+                        "full_doc_id" : chunk.get("full_doc_id")
                     }
                 )
 
@@ -3074,6 +3076,7 @@ async def _merge_all_chunks(
                         "content": chunk["content"],
                         "file_path": chunk.get("file_path", "unknown_source"),
                         "chunk_id": chunk_id,
+                        "full_doc_id" : chunk.get("full_doc_id")
                     }
                 )
 
@@ -3088,6 +3091,7 @@ async def _merge_all_chunks(
                         "content": chunk["content"],
                         "file_path": chunk.get("file_path", "unknown_source"),
                         "chunk_id": chunk_id,
+                         "full_doc_id" : chunk.get("full_doc_id")
                     }
                 )
 
