@@ -74,3 +74,4 @@ memory-bank
 memory-bank/
 .clinerules
 markdowns/
+__pycache__/

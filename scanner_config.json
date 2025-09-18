@@ -85,6 +85,13 @@
       ]
     }
   },
+  "api": {
+    "base_url": "http://localhost:9621",
+    "api_key": null,
+    "timeout": 30,
+    "max_retries": 3,
+    "retry_delay": 1
+  },
   "logging": {
     "level": "INFO",
     "format": "text",

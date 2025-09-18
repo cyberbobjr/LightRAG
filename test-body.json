@@ -1,0 +1,13 @@
+{
+  "query": "aaron",
+  "mode": "global",
+  "only_need_context": true,
+  "only_need_prompt": true,
+  "response_type": "string",
+  "top_k": 10,
+  "chunk_top_k": 10,
+  "max_entity_tokens": 6000,
+  "max_relation_tokens": 9000,
+  "max_total_tokens": 30000,
+  "enable_rerank": false
+}

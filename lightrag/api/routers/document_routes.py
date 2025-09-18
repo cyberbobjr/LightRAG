@@ -140,13 +140,44 @@ class InsertTextRequest(BaseModel):
     Attributes:
         text: The text content to be inserted into the RAG system
         file_source: Source of the text (optional)
+        metadata: Optional metadata to be attached to the document
     """
 
     text: str = Field(
         min_length=1,
         description="The text to insert",
+        examples=[
+            "This is a sample document about artificial intelligence and machine learning.",
+            "Voici un document exemple sur l'intelligence artificielle."
+        ]
     )
-    file_source: str = Field(default=None, min_length=0, description="File Source")
+    file_source: str = Field(
+        default=None, 
+        min_length=0, 
+        description="File source or identifier",
+        examples=["document.txt", "article_123", "manual.pdf"]
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None, 
+        description="Optional metadata to be attached to the document. Can include any key-value pairs such as author, language, category, creation date, tags, etc.",
+        examples=[
+            {
+                "author": "John Doe",
+                "language": "en",
+                "category": "technical",
+                "created_date": "2025-01-15",
+                "tags": ["AI", "ML", "technology"]
+            },
+            {
+                "titre": "Guide utilisateur",
+                "auteur": "Marie Dupont", 
+                "langue": "fr",
+                "departement": "Support technique",
+                "version": "1.2",
+                "date_creation": "2025-01-15T10:30:00Z"
+            }
+        ]
+    )
 
     @field_validator("text", mode="after")
     @classmethod
@@ -163,6 +194,23 @@ class InsertTextRequest(BaseModel):
             "example": {
                 "text": "This is a sample text to be inserted into the RAG system.",
                 "file_source": "Source of the text (optional)",
+                "metadata": [
+                    {
+                        "author": "John Doe",
+                        "language": "en",
+                        "category": "technical",
+                        "created_date": "2025-01-15",
+                        "tags": ["AI", "ML", "technology"]
+                    },
+                    {
+                        "titre": "Guide utilisateur",
+                        "auteur": "Marie Dupont", 
+                        "langue": "fr",
+                        "departement": "Support technique",
+                        "version": "1.2",
+                        "date_creation": "2025-01-15T10:30:00Z"
+                    }
+                ]
             }
         }
 
@@ -173,20 +221,48 @@ class InsertTextsRequest(BaseModel):
     Attributes:
         texts: List of text contents to be inserted into the RAG system
         file_sources: Sources of the texts (optional)
+        metadata_list: Optional list of metadata dictionaries, one for each text
     """
 
     texts: list[str] = Field(
         min_length=1,
         description="The texts to insert",
+        examples=[
+            ["First document about AI", "Second document about ML"],
+            ["Premier document sur l'IA", "Second document sur l'apprentissage automatique"]
+        ]
     )
     file_sources: list[str] = Field(
-        default=None, min_length=0, description="Sources of the texts"
+        default=None, 
+        min_length=0, 
+        description="Sources of the texts",
+        examples=[
+            ["doc1.txt", "doc2.txt"],
+            ["article_1.md", "article_2.md"]
+        ]
+    )
+    metadata_list: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Optional list of metadata dictionaries, one for each text. Must have same length as texts if provided.",
+        examples=[
+                {"auteur": "Pierre", "categorie": "IA", "langue": "fr"},
+                {"auteur": "Marie", "categorie": "ML", "langue": "fr"}
+        ]
     )
 
     @field_validator("texts", mode="after")
     @classmethod
     def strip_texts_after(cls, texts: list[str]) -> list[str]:
         return [text.strip() for text in texts]
+
+    @field_validator("metadata_list", mode="after")
+    @classmethod
+    def validate_metadata_list_length(cls, metadata_list: Optional[List[Dict[str, Any]]], info) -> Optional[List[Dict[str, Any]]]:
+        if metadata_list is not None and hasattr(info, 'data') and 'texts' in info.data:
+            texts = info.data['texts']
+            if len(metadata_list) != len(texts):
+                raise ValueError(f"metadata_list length ({len(metadata_list)}) must match texts length ({len(texts)})")
+        return metadata_list
 
     @field_validator("file_sources", mode="after")
     @classmethod
@@ -200,9 +276,17 @@ class InsertTextsRequest(BaseModel):
                     "This is the first text to be inserted.",
                     "This is the second text to be inserted.",
                 ],
-                "file_sources": [
-                    "First file source (optional)",
-                ],
+                "file_sources": ["doc1.txt", "doc2.txt"],
+                "metadata_list": [
+                    [
+                        {"author": "Alice", "category": "AI", "language": "en"},
+                        {"author": "Bob", "category": "ML", "language": "en"}
+                    ],
+                    [
+                        {"auteur": "Pierre", "categorie": "IA", "langue": "fr"},
+                        {"auteur": "Marie", "categorie": "ML", "langue": "fr"}
+                    ]
+                ]
             }
         }
 
@@ -1355,14 +1439,16 @@ async def pipeline_index_texts(
     rag: LightRAG,
     texts: List[str],
     file_sources: List[str] = None,
+    metadata_list: List[Dict[str, Any]] = None,
     track_id: str = None,
 ):
-    """Index a list of texts with track_id
+    """Index a list of texts with track_id and optional metadata
 
     Args:
         rag: LightRAG instance
         texts: The texts to index
         file_sources: Sources of the texts
+        metadata_list: Optional list of metadata dictionaries for each text
         track_id: Optional tracking ID
     """
     if not texts:
@@ -1373,8 +1459,20 @@ async def pipeline_index_texts(
                 file_sources.append("unknown_source")
                 for _ in range(len(file_sources), len(texts))
             ]
+    
+    # Handle metadata list
+    if metadata_list is not None:
+        if len(metadata_list) != len(texts):
+            # Extend or trim metadata_list to match texts length
+            while len(metadata_list) < len(texts):
+                metadata_list.append({})
+            metadata_list = metadata_list[:len(texts)]
+    
     await rag.apipeline_enqueue_documents(
-        input=texts, file_paths=file_sources, track_id=track_id
+        input=texts, 
+        file_paths=file_sources, 
+        metadata=metadata_list,
+        track_id=track_id
     )
     await rag.apipeline_process_enqueue_documents()
 
@@ -1732,30 +1830,73 @@ def create_document_routes(
         request: InsertTextRequest, background_tasks: BackgroundTasks
     ):
         """
-        Insert text into the RAG system.
+        Insert text into the RAG system with optional metadata.
 
         This endpoint allows you to insert text data into the RAG system for later retrieval
-        and use in generating responses.
+        and use in generating responses. You can optionally include metadata that will be
+        stored with the document and returned during query operations.
+
+        The metadata can include any key-value pairs such as:
+        - author/auteur: Document author
+        - language/langue: Document language (en, fr, etc.)
+        - category/categorie: Document category
+        - created_date/date_creation: Creation date
+        - tags/mots_cles: List of tags
+        - version: Document version
+        - department/departement: Organizational department
+        - Any other custom fields you need
 
         Args:
-            request (InsertTextRequest): The request body containing the text to be inserted.
+        
+            request (InsertTextRequest): The request body containing:
+            
+                - text: The text content to be inserted (required)
+                - file_source: Optional source identifier  
+                - metadata: Optional dictionary of metadata fields
+            
             background_tasks: FastAPI BackgroundTasks for async processing
 
         Returns:
-            InsertResponse: A response object containing the status of the operation.
+        
+            InsertResponse: A response object containing:
+            
+                - status: "success" or "error"
+                - message: Descriptive message
+                - track_id: Unique tracking ID for this operation
 
         Raises:
             HTTPException: If an error occurs during text processing (500).
+
+        Example:
+        
+            ```json
+            {
+                "text": "This document explains RAG implementation best practices.",
+                "file_source": "rag_guide.md",
+                "metadata": {
+                    "author": "Jane Smith",
+                    "language": "en",
+                    "category": "technical_documentation",
+                    "created_date": "2025-01-15T09:30:00Z",
+                    "tags": ["RAG", "AI", "best-practices"],
+                    "version": "1.0"
+                }
+            }
+            ```
         """
         try:
             # Generate track_id for text insertion
             track_id = generate_track_id("insert")
+
+            # Prepare metadata list if provided
+            metadata_list = [request.metadata] if request.metadata else None
 
             background_tasks.add_task(
                 pipeline_index_texts,
                 rag,
                 [request.text],
                 file_sources=[request.file_source],
+                metadata_list=metadata_list,
                 track_id=track_id,
             )
 
@@ -1778,20 +1919,43 @@ def create_document_routes(
         request: InsertTextsRequest, background_tasks: BackgroundTasks
     ):
         """
-        Insert multiple texts into the RAG system.
+        Insert multiple texts into the RAG system with optional metadata.
 
         This endpoint allows you to insert multiple text entries into the RAG system
-        in a single request.
+        in a single request. Each text can optionally have associated metadata.
 
         Args:
-            request (InsertTextsRequest): The request body containing the list of texts.
+        
+            request (InsertTextsRequest): The request body containing:
+            
+                - texts: List of text contents to be inserted (required)
+                - file_sources: Optional list of source identifiers
+                - metadata_list: Optional list of metadata dictionaries (one per text)
             background_tasks: FastAPI BackgroundTasks for async processing
 
         Returns:
+        
             InsertResponse: A response object containing the status of the operation.
 
         Raises:
+        
             HTTPException: If an error occurs during text processing (500).
+
+        Example:
+        
+            ```json
+            {
+                "texts": [
+                    "First document about AI technologies",
+                    "Second document about machine learning"
+                ],
+                "file_sources": ["doc1.txt", "doc2.txt"],
+                "metadata_list": [
+                    {"author": "Alice", "category": "AI", "language": "en"},
+                    {"author": "Bob", "category": "ML", "language": "en"}
+                ]
+            }
+            ```
         """
         try:
             # Generate track_id for texts insertion
@@ -1802,6 +1966,7 @@ def create_document_routes(
                 rag,
                 request.texts,
                 file_sources=request.file_sources,
+                metadata_list=request.metadata_list,
                 track_id=track_id,
             )
 

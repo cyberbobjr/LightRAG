@@ -11,7 +11,7 @@
     "all",
     "-p",
     "9622:9621",
-    "--network=devcontainers-net",
+    "--network=devcontainers-net:allow_host_loopback=true",
     "--name=LightRAG"
   ],
   "mounts": [

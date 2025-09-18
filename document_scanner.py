@@ -2,39 +2,26 @@
 """
 Document Scanner pour LightRAG
 Scanne un répertoire et insère automatiquement tous les documents dans LightRAG
-avec métadonnées configurables.
+avec métadonnées configurables via l'API REST.
 """
 
 import json
 import os
-import asyncio
+import requests
 import logging
-from lightrag.french_chunking import create_french_chunking_func
-import numpy as np
 from pathlib import Path
 from typing import Dict, List, Any
 from datetime import datetime
-from dotenv import load_dotenv  # Ajouté pour charger .env
+from dotenv import load_dotenv
 
 load_dotenv()
 
-# Import LightRAG
-import sys
-sys.path.append(str(Path(__file__).parent / "LightRag"))
-
-try:
-    from lightrag import LightRAG
-    from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
-    from lightrag.utils import EmbeddingFunc
-    from lightrag.constants import *
-except ImportError as e:
-    print(f"Erreur d'import LightRAG: {e}")
-    print("Assurez-vous que LightRAG est installé et accessible")
-    sys.exit(1)
+# Configuration de logging basique
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 class DocumentScanner:
-    """Scanner de documents pour insertion automatique dans LightRAG"""
+    """Scanner de documents pour insertion automatique dans LightRAG via API REST"""
     
     def __init__(self, config_path: str = "scanner_config.json"):
         """
@@ -45,8 +32,8 @@ class DocumentScanner:
         """
         self.config_path = config_path
         self.config = self._load_config()
-        self.rag = self._initialize_rag()
         self._setup_logging()
+        self._setup_api_client()
     
     def _load_config(self) -> Dict[str, Any]:
         """Charge la configuration depuis le fichier JSON"""
@@ -60,19 +47,19 @@ class DocumentScanner:
     def _create_default_config(self):
         """Crée un fichier de configuration par défaut"""
         default_config = {
+            "api": {
+                "base_url": "http://localhost:9621",
+                "api_key": None,  # Sera lu depuis la variable d'environnement LIGHTRAG_API_KEY
+                "timeout": 300,
+                "max_retries": 3
+            },
             "scanner": {
                 "source_directory": "./documents",
                 "file_extensions": [".txt", ".md", ".pdf", ".docx", ".json"],
                 "recursive": True,
                 "exclude_patterns": ["__pycache__", ".git", ".env", "*.pyc"],
-                "max_file_size_mb": 50
-            },
-            "lightrag": {
-                "working_dir": "./rag_storage",
-                "chunk_token_size": 1200,
-                "model_name": "gpt-4o-mini",
-                "embedding_model": "text-embedding-3-small",
-                "api_key_env": "OPENAI_API_KEY"
+                "max_file_size_mb": 50,
+                "batch_size": 10  # Nombre de documents à traiter par batch
             },
             "metadata": {
                 "global_metadata": {
@@ -161,37 +148,89 @@ class DocumentScanner:
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
     
-    def _initialize_rag(self) -> LightRAG:
-        """Initialise l'instance LightRAG avec la configuration"""
-        rag_config = self.config.get("lightrag", {})
+    def _setup_api_client(self):
+        """Configure le client API"""
+        api_config = self.config.get("api", {})
+        self.base_url = api_config.get("base_url", "http://localhost:9621")
         
-        # Configuration par défaut pour les LLM
-        async def llm_model_func(
-            prompt, system_prompt=None, history_messages=[], **kwargs
-        ) -> str:
-            return await gpt_4o_mini_complete(
-                prompt, system_prompt, history_messages, **kwargs
+        # Récupération de la clé API depuis la config ou l'environnement
+        self.api_key = api_config.get("api_key") or os.getenv("LIGHTRAG_API_KEY")
+        
+        self.timeout = api_config.get("timeout", 300)
+        self.max_retries = api_config.get("max_retries", 3)
+        
+        # Configuration des headers HTTP
+        self.headers = {
+            "Content-Type": "application/json"
+        }
+        
+        # Obtenir un token d'authentication
+        self._authenticate()
+            
+        logging.info(f"Client API configuré pour {self.base_url}")
+    
+    def _authenticate(self) -> None:
+        """Obtient un token d'authentication"""
+        try:
+            # Essayer d'abord avec les credentials de l'environnement
+            auth_data = {
+                "username": "admin",  # TODO: rendre configurable
+                "password": "admin123"  # TODO: rendre configurable
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/login",
+                data=auth_data,  # Form data, pas JSON
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=self.timeout
             )
+            
+            if response.status_code == 200:
+                token_data = response.json()
+                token = token_data.get("access_token")
+                if token:
+                    self.headers["Authorization"] = f"Bearer {token}"
+                    logging.info("Authentication réussie")
+                else:
+                    logging.warning("Token non trouvé dans la réponse")
+            else:
+                logging.warning(f"Authentication échouée: {response.status_code}")
+                
+        except Exception as e:
+            logging.warning(f"Erreur d'authentication: {e}. Tentative sans token...")
+    
+    def _make_api_request(self, method: str, endpoint: str, **kwargs) -> requests.Response:
+        """Effectue une requête API avec retry"""
+        url = f"{self.base_url}{endpoint}"
+        response = None
         
-        async def embedding_func(texts: list[str]) -> np.ndarray:
-            return await openai_embed(
-                texts, model=rag_config.get("embedding_model", "text-embedding-3-small")
-            )
+        for attempt in range(self.max_retries):
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    headers=self.headers,
+                    timeout=self.timeout,
+                    **kwargs
+                )
+                
+                if response.status_code == 200:
+                    return response
+                else:
+                    logging.warning(f"Tentative {attempt + 1}: Status {response.status_code} pour {url}")
+                    if attempt == self.max_retries - 1:
+                        response.raise_for_status()
+                        
+            except requests.exceptions.RequestException as e:
+                logging.warning(f"Tentative {attempt + 1}: Erreur {e}")
+                if attempt == self.max_retries - 1:
+                    raise
         
-        # Créer l'instance LightRAG
-        rag = LightRAG(
-            working_dir=rag_config.get("working_dir", "./rag_storage"),
-            chunk_token_size=rag_config.get("chunk_token_size", 1200),
-            llm_model_func=llm_model_func,
-            embedding_func=EmbeddingFunc(
-                embedding_dim=rag_config.get("embedding_dim", 1536),
-                max_token_size=rag_config.get("embedding_max_tokens", 8192),
-                func=embedding_func,
-            ),
-            chunking_func=create_french_chunking_func(),
-        )
-
-        return rag
+        # Si nous arrivons ici, quelque chose s'est mal passé
+        if response is not None:
+            return response
+        else:
+            raise Exception("Toutes les tentatives ont échoué sans réponse")
     
     def _should_process_file(self, file_path: Path) -> bool:
         """Détermine si un fichier doit être traité"""
@@ -324,33 +363,50 @@ class DocumentScanner:
         logging.info(f"Total documents trouvés: {len(documents)}")
         return documents
     
-    async def insert_documents(self, documents: List[Dict[str, Any]]) -> str:
+    def insert_documents(self, documents: List[Dict[str, Any]]) -> str:
         """Insère les documents dans LightRAG"""
         if not documents:
             logging.warning("Aucun document à insérer")
             return ""
         
-        # Préparer les données pour l'insertion
-        contents = [doc["content"] for doc in documents]
-        file_paths = [str(doc["path"]) for doc in documents]
-        metadata = [doc["metadata"] for doc in documents]
+        # Préparer les données pour l'insertion via API
+        texts = []
+        file_sources = []
+        metadata_list = []
         
-        # Insérer via LightRAG
+        for doc in documents:
+            texts.append(doc["content"])
+            file_sources.append(str(doc["path"]))
+            if doc["metadata"]:
+                metadata_list.append(doc["metadata"])
+            else:
+                metadata_list.append({})
+        
+        # Insérer via API REST
         try:
-            track_id = await self.rag.ainsert(
-                input=contents,
-                file_paths=file_paths,
-                metadata=metadata
-            )
+            endpoint = "/documents/texts"
+            payload = {
+                "texts": texts,
+                "file_sources": file_sources,
+                "metadata_list": metadata_list
+            }
             
-            logging.info(f"Insertion terminée. Track ID: {track_id}")
-            return track_id
+            response = self._make_api_request("POST", endpoint, json=payload)
+            
+            if response.status_code == 200:
+                result = response.json()
+                logging.info(f"Insertion terminée avec succès. Résultat: {result}")
+                return str(result)
+            else:
+                error_msg = f"Erreur API {response.status_code}: {response.text}"
+                logging.error(error_msg)
+                raise Exception(error_msg)
             
         except Exception as e:
             logging.error(f"Erreur lors de l'insertion: {e}")
             raise
     
-    async def run(self) -> str:
+    def run(self) -> str:
         """Exécute le scan et l'insertion des documents"""
         # Scanner les documents
         documents = self.scan_directory()
@@ -359,21 +415,16 @@ class DocumentScanner:
             logging.info("Aucun document trouvé à traiter")
             return ""
         
-        # Insérer les documents
-        track_id = await self.insert_documents(documents)
-        logging.info(f"Traitement terminé avec succès. Track ID: {track_id}")
-        return track_id
-
-    async def initialize(self):
-        """Initialise les stockages et le pipeline status de LightRAG"""
-        await self.rag.initialize_storages()
-        from lightrag.kg.shared_storage import initialize_pipeline_status
-        await initialize_pipeline_status()
+        # Insérer les documents via API
+        result = self.insert_documents(documents)
+        logging.info(f"Traitement terminé avec succès. Résultat: {result}")
+        return result
 
 
 def main():
     """Point d'entrée principal"""
     import argparse
+    import sys
     
     parser = argparse.ArgumentParser(description="Scanner de documents pour LightRAG")
     parser.add_argument(
@@ -402,16 +453,11 @@ def main():
                 print(f"    ... et {len(documents) - 5} autres")
         else:
             # Exécution réelle
-            asyncio.run(run_with_init(scanner))
+            result = scanner.run()
+            print(f"Traitement terminé: {result}")
     except Exception as e:
         logging.error(f"Erreur fatale: {e}")
         sys.exit(1)
-
-
-async def run_with_init(scanner):
-    await scanner.initialize()
-    await scanner.run()
-
 
 if __name__ == "__main__":
     main()
