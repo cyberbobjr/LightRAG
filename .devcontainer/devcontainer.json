@@ -12,13 +12,14 @@
     "-p",
     "9622:9621",
     "--network=devcontainers-net:allow_host_loopback=true",
-    "--name=LightRAG"
+    "--name=LightRAG",
+    "--add-host=host.containers.internal:host-gateway"  // Ajoutez cette ligne pour Podman
   ],
   "mounts": [
     "source=${localWorkspaceFolder}/.bash_history,target=/root/.bash_history,type=bind"
   ],
   "remoteUser": "root",
-  "postCreateCommand": "",
+  "postCreateCommand": "git config --global --add safe.directory /workspaces/LightRAG",
   "postStartCommand": "",
   "customizations": {
     "vscode": {

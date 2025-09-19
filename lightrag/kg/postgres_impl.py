@@ -1487,6 +1487,20 @@ class PGKVStorage(BaseKVStorage):
                     processed_results[row["id"]] = row
                 return processed_results
 
+            # For FULL_DOCS namespace, parse meta JSON string back to dict
+            if is_namespace(self.namespace, NameSpace.KV_STORE_FULL_DOCS):
+                processed_results = {}
+                for row in results:
+                    meta = row.get("meta", "{}")
+                    if isinstance(meta, str):
+                        try:
+                            meta = json.loads(meta)
+                        except json.JSONDecodeError:
+                            meta = {}
+                    row["meta"] = meta
+                    processed_results[row["id"]] = row
+                return processed_results
+
             # For FULL_ENTITIES namespace, parse entity_names JSON string back to list
             if is_namespace(self.namespace, NameSpace.KV_STORE_FULL_ENTITIES):
                 processed_results = {}
@@ -1580,6 +1594,17 @@ class PGKVStorage(BaseKVStorage):
                 "update_time": create_time if update_time == 0 else update_time,
             }
 
+        # Special handling for FULL_DOCS namespace
+        if response and is_namespace(self.namespace, NameSpace.KV_STORE_FULL_DOCS):
+            # Parse meta JSON string back to dict
+            meta = response.get("meta", "{}")
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except json.JSONDecodeError:
+                    meta = {}
+            response["meta"] = meta
+
         # Special handling for FULL_ENTITIES namespace
         if response and is_namespace(self.namespace, NameSpace.KV_STORE_FULL_ENTITIES):
             # Parse entity_names JSON string back to list
@@ -1665,6 +1690,18 @@ class PGKVStorage(BaseKVStorage):
                 processed_results.append(processed_row)
             return processed_results
 
+        # Special handling for FULL_DOCS namespace
+        if results and is_namespace(self.namespace, NameSpace.KV_STORE_FULL_DOCS):
+            for result in results:
+                # Parse meta JSON string back to dict
+                meta = result.get("meta", "{}")
+                if isinstance(meta, str):
+                    try:
+                        meta = json.loads(meta)
+                    except json.JSONDecodeError:
+                        meta = {}
+                result["meta"] = meta
+
         # Special handling for FULL_ENTITIES namespace
         if results and is_namespace(self.namespace, NameSpace.KV_STORE_FULL_ENTITIES):
             for result in results:
@@ -1747,10 +1784,14 @@ class PGKVStorage(BaseKVStorage):
         elif is_namespace(self.namespace, NameSpace.KV_STORE_FULL_DOCS):
             for k, v in data.items():
                 upsert_sql = SQL_TEMPLATES["upsert_doc_full"]
+                # Serialize meta to JSON string for JSONB column
+                meta_json = json.dumps(v.get("meta", {}))
                 _data = {
                     "id": k,
                     "content": v["content"],
                     "workspace": self.workspace,
+                    "meta": meta_json,
+                    "doc_name": v.get("doc_name", ""),
                 }
                 await self.db.execute(upsert_sql, _data)
         elif is_namespace(self.namespace, NameSpace.KV_STORE_LLM_RESPONSE_CACHE):
@@ -4430,7 +4471,9 @@ TABLES = {
 
 SQL_TEMPLATES = {
     # SQL for KVStorage
-    "get_by_id_full_docs": """SELECT id, COALESCE(content, '') as content
+    "get_by_id_full_docs": """SELECT id, COALESCE(content, '') as content,
+                                COALESCE(meta, '{}'::jsonb) as meta,
+                                COALESCE(doc_name, '') as doc_name
                                 FROM LIGHTRAG_DOC_FULL WHERE workspace=$1 AND id=$2
                             """,
     "get_by_id_text_chunks": """SELECT id, tokens, COALESCE(content, '') as content,
@@ -4445,7 +4488,9 @@ SQL_TEMPLATES = {
                                 EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
                                 FROM LIGHTRAG_LLM_CACHE WHERE workspace=$1 AND id=$2
                                """,
-    "get_by_ids_full_docs": """SELECT id, COALESCE(content, '') as content
+    "get_by_ids_full_docs": """SELECT id, COALESCE(content, '') as content,
+                                 COALESCE(meta, '{}'::jsonb) as meta,
+                                 COALESCE(doc_name, '') as doc_name
                                  FROM LIGHTRAG_DOC_FULL WHERE workspace=$1 AND id IN ({ids})
                             """,
     "get_by_ids_text_chunks": """SELECT id, tokens, COALESCE(content, '') as content,
@@ -4481,10 +4526,10 @@ SQL_TEMPLATES = {
                                  FROM LIGHTRAG_FULL_RELATIONS WHERE workspace=$1 AND id IN ({ids})
                                 """,
     "filter_keys": "SELECT id FROM {table_name} WHERE workspace=$1 AND id IN ({ids})",
-    "upsert_doc_full": """INSERT INTO LIGHTRAG_DOC_FULL (id, content, workspace)
-                        VALUES ($1, $2, $3)
+    "upsert_doc_full": """INSERT INTO LIGHTRAG_DOC_FULL (id, content, workspace, meta, doc_name)
+                        VALUES ($1, $2, $3, $4, $5)
                         ON CONFLICT (workspace,id) DO UPDATE
-                           SET content = $2, update_time = CURRENT_TIMESTAMP
+                           SET content = $2, meta = $4, doc_name = $5, update_time = CURRENT_TIMESTAMP
                        """,
     "upsert_llm_response_cache": """INSERT INTO LIGHTRAG_LLM_CACHE(workspace,id,original_prompt,return_value,chunk_id,cache_type,queryparam)
                                       VALUES ($1, $2, $3, $4, $5, $6, $7)

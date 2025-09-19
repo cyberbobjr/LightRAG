@@ -26,8 +26,8 @@ class VersionManager:
             raise ValueError("Version non trouvée dans __init__.py")
     
     def parse_version(self, version_str):
-        """Parse une version au format: 1.4.9-cyberbobjr.1"""
-        # Pattern pour: major.minor.patch-cyberbobjr.fork_version
+        """Parse une version au format: 1.4.9-1"""
+        # Pattern pour: major.minor.patch-fork_version
         pattern = r'^(\d+)\.(\d+)\.(\d+)-cyberbobjr\.(\d+)$'
         match = re.match(pattern, version_str)
         
@@ -60,7 +60,7 @@ class VersionManager:
         else:
             raise ValueError("Type de bump invalide. Utilisez: major, minor, patch, ou fork")
             
-        return f"{version_parts['major']}.{version_parts['minor']}.{version_parts['patch']}-cyberbobjr.{version_parts['fork']}"
+        return f"{version_parts['major']}.{version_parts['minor']}.{version_parts['patch']}-{version_parts['fork']}"
     
     def update_version_files(self, new_version):
         """Met à jour les fichiers avec la nouvelle version"""
@@ -121,10 +121,10 @@ class VersionManager:
 def main():
     if len(sys.argv) != 2:
         print("Usage: python version_manager.py [major|minor|patch|fork]")
-        print("  major: 1.4.9-cyberbobjr.1 -> 2.0.0-cyberbobjr.1")
-        print("  minor: 1.4.9-cyberbobjr.1 -> 1.5.0-cyberbobjr.1") 
-        print("  patch: 1.4.9-cyberbobjr.1 -> 1.4.10-cyberbobjr.1")
-        print("  fork:  1.4.9-cyberbobjr.1 -> 1.4.9-cyberbobjr.2")
+        print("  major: 1.4.9-1 -> 2.0.0-1")
+        print("  minor: 1.4.9-1 -> 1.5.0-1") 
+        print("  patch: 1.4.9-1 -> 1.4.10-1")
+        print("  fork:  1.4.9-1 -> 1.4.9-2")
         sys.exit(1)
     
     bump_type = sys.argv[1].lower()
