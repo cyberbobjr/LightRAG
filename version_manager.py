@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script de gestion des versions pour le fork LightRAG de cyberbobjr
+Script de gestion des versions pour LightRAG
 Usage: python version_manager.py [patch|minor|major]
 """
 
@@ -26,9 +26,9 @@ class VersionManager:
             raise ValueError("Version non trouvée dans __init__.py")
     
     def parse_version(self, version_str):
-        """Parse une version au format: 1.4.9-1"""
-        # Pattern pour: major.minor.patch-fork_version
-        pattern = r'^(\d+)\.(\d+)\.(\d+)-cyberbobjr\.(\d+)$'
+        """Parse une version au format: 1.4.9"""
+        # Pattern pour: major.minor.patch
+        pattern = r'^(\d+)\.(\d+)\.(\d+)$'
         match = re.match(pattern, version_str)
         
         if not match:
@@ -37,8 +37,7 @@ class VersionManager:
         return {
             'major': int(match.group(1)),
             'minor': int(match.group(2)), 
-            'patch': int(match.group(3)),
-            'fork': int(match.group(4))
+            'patch': int(match.group(3))
         }
     
     def increment_version(self, version_parts, bump_type):
@@ -47,20 +46,15 @@ class VersionManager:
             version_parts['major'] += 1
             version_parts['minor'] = 0
             version_parts['patch'] = 0
-            version_parts['fork'] = 1
         elif bump_type == "minor":
             version_parts['minor'] += 1
             version_parts['patch'] = 0
-            version_parts['fork'] = 1
         elif bump_type == "patch":
             version_parts['patch'] += 1
-            version_parts['fork'] = 1
-        elif bump_type == "fork":
-            version_parts['fork'] += 1
         else:
-            raise ValueError("Type de bump invalide. Utilisez: major, minor, patch, ou fork")
+            raise ValueError("Type de bump invalide. Utilisez: major, minor, ou patch")
             
-        return f"{version_parts['major']}.{version_parts['minor']}.{version_parts['patch']}-{version_parts['fork']}"
+        return f"{version_parts['major']}.{version_parts['minor']}.{version_parts['patch']}"
     
     def update_version_files(self, new_version):
         """Met à jour les fichiers avec la nouvelle version"""
@@ -95,7 +89,7 @@ class VersionManager:
             
         return api_version
     
-    def bump_version(self, bump_type="fork"):
+    def bump_version(self, bump_type="patch"):
         """Fonction principale pour incrémenter la version"""
         try:
             current_version = self.get_current_version()
@@ -120,16 +114,15 @@ class VersionManager:
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python version_manager.py [major|minor|patch|fork]")
-        print("  major: 1.4.9-1 -> 2.0.0-1")
-        print("  minor: 1.4.9-1 -> 1.5.0-1") 
-        print("  patch: 1.4.9-1 -> 1.4.10-1")
-        print("  fork:  1.4.9-1 -> 1.4.9-2")
+        print("Usage: python version_manager.py [major|minor|patch]")
+        print("  major: 1.4.9 -> 2.0.0")
+        print("  minor: 1.4.9 -> 1.5.0") 
+        print("  patch: 1.4.9 -> 1.4.10")
         sys.exit(1)
     
     bump_type = sys.argv[1].lower()
-    if bump_type not in ['major', 'minor', 'patch', 'fork']:
-        print("Type de bump invalide. Utilisez: major, minor, patch, ou fork")
+    if bump_type not in ['major', 'minor', 'patch']:
+        print("Type de bump invalide. Utilisez: major, minor, ou patch")
         sys.exit(1)
     
     manager = VersionManager()
