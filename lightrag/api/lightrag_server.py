@@ -35,6 +35,7 @@ from lightrag import LightRAG, __version__ as core_version
 from lightrag.api import __api_version__
 from lightrag.types import GPTKeywordExtractionFormat
 from lightrag.utils import EmbeddingFunc
+from lightrag.french_chunking import create_french_chunking_func
 from lightrag.constants import (
     DEFAULT_LOG_MAX_BYTES,
     DEFAULT_LOG_BACKUP_COUNT,
@@ -609,6 +610,7 @@ def create_app(args):
             rerank_model_func=rerank_model_func,
             max_parallel_insert=args.max_parallel_insert,
             max_graph_nodes=args.max_graph_nodes,
+            chunking_func=create_french_chunking_func(),
             addon_params={
                 "language": args.summary_language,
                 "entity_types": args.entity_types,
