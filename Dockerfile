@@ -1,5 +1,7 @@
 # Build stage
 FROM python:3.12-slim AS builder
+ARG LIGHTRAG_VERSION=unknown
+LABEL org.opencontainers.image.version="${LIGHTRAG_VERSION}"
 
 WORKDIR /app
 
@@ -34,7 +36,8 @@ RUN pip install --user --no-cache-dir pypdf2 python-docx python-pptx openpyxl nl
 
 # Final stage
 FROM python:3.12-slim
-
+ARG LIGHTRAG_VERSION=unknown
+LABEL org.opencontainers.image.version="${LIGHTRAG_VERSION}"
 WORKDIR /app
 
 # Upgrade pip and setuptools
