@@ -4630,6 +4630,7 @@ SQL_TEMPLATES = {
               SELECT c.id,
                      c.content,
                      c.file_path,
+                     c.full_doc_id,
                      EXTRACT(EPOCH FROM c.create_time)::BIGINT AS created_at
               FROM LIGHTRAG_VDB_CHUNKS c
               WHERE c.workspace = $1
