@@ -11,6 +11,7 @@ try:
     import nltk
     from nltk.tokenize import sent_tokenize
     NLTK_AVAILABLE = True
+    print("NLTK disponible. Chargement effectué.")
 except ImportError:
     NLTK_AVAILABLE = False
     print("NLTK n'est pas disponible. Installation nécessaire: pip install nltk")

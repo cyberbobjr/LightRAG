@@ -18,6 +18,7 @@ ENV UV_HTTP_TIMEOUT=120
 
 # Installe pipenv ou autre gestionnaire si tu veux
 RUN pip install --upgrade pip
+RUN pip install nltk
 RUN git config --global user.name "Benjamin Marchand"
 RUN git config --global user.email "ben.marchand@free.fr"
 RUN git config --global core.editor "vim"
