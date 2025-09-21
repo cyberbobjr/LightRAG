@@ -19,7 +19,7 @@
     "source=${localWorkspaceFolder}/.bash_history,target=/root/.bash_history,type=bind"
   ],
   "remoteUser": "root",
-  "postCreateCommand": "git config --global --add safe.directory /workspaces/LightRAG",
+  "postCreateCommand": "git config --global --add safe.directory /workspaces/LightRAG && pip install -e '.[api]'",
   "postStartCommand": "",
   "customizations": {
     "vscode": {

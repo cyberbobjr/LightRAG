@@ -568,6 +568,61 @@ class TrackStatusResponse(BaseModel):
         }
 
 
+class CompleteDocumentResponse(BaseModel):
+    """Response model for a complete document including metadata and full content
+
+    Attributes:
+        id: Document identifier
+        content: Full document content
+        content_length: Length of document content in characters
+        status: Current processing status
+        created_at: Creation timestamp (ISO format string)
+        updated_at: Last update timestamp (ISO format string)
+        track_id: Tracking ID for monitoring progress
+        chunks_count: Number of chunks the document was split into
+        error_msg: Error message if processing failed
+        metadata: Additional metadata about the document
+        file_path: Path to the document file
+    """
+
+    id: str = Field(description="Document identifier")
+    content: str = Field(description="Full document content")
+    content_length: int = Field(description="Length of document content in characters")
+    status: DocStatus = Field(description="Current processing status")
+    created_at: str = Field(description="Creation timestamp (ISO format string)")
+    updated_at: str = Field(description="Last update timestamp (ISO format string)")
+    track_id: Optional[str] = Field(
+        default=None, description="Tracking ID for monitoring progress"
+    )
+    chunks_count: Optional[int] = Field(
+        default=None, description="Number of chunks the document was split into"
+    )
+    error_msg: Optional[str] = Field(
+        default=None, description="Error message if processing failed"
+    )
+    metadata: Optional[dict[str, Any]] = Field(
+        default=None, description="Additional metadata about the document"
+    )
+    file_path: str = Field(description="Path to the document file")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "doc_123456",
+                "content": "This is the full content of the document. It contains detailed information about machine learning techniques...",
+                "content_length": 15240,
+                "status": "PROCESSED",
+                "created_at": "2025-03-31T12:34:56",
+                "updated_at": "2025-03-31T12:35:30",
+                "track_id": "upload_20250729_170612_abc123",
+                "chunks_count": 12,
+                "error_msg": None,
+                "metadata": {"author": "John Doe", "year": 2025},
+                "file_path": "research_paper.pdf",
+            }
+        }
+
+
 class DocumentsRequest(BaseModel):
     """Request model for paginated document queries
 
@@ -2671,6 +2726,75 @@ def create_document_routes(
 
         except Exception as e:
             logger.error(f"Error getting paginated documents: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get(
+        "/{doc_id}",
+        response_model=CompleteDocumentResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def get_document_by_id(doc_id: str) -> CompleteDocumentResponse:
+        """
+        Get a complete document by its ID, including metadata and full content.
+
+        This endpoint retrieves a document's complete information including both metadata
+        (status, creation dates, chunks count, etc.) and the full document content.
+
+        Args:
+            doc_id (str): The unique identifier of the document to retrieve
+
+        Returns:
+            CompleteDocumentResponse: A response object containing all document metadata and full content
+
+        Raises:
+            HTTPException: 
+                - 400 if the document ID is empty or invalid
+                - 404 if the document is not found 
+                - 500 if an error occurs while retrieving the document
+        """
+        try:
+            # Validate document ID
+            if not doc_id or not doc_id.strip():
+                raise HTTPException(status_code=400, detail="Document ID cannot be empty")
+            
+            doc_id = doc_id.strip()
+
+            # Get document status and content in parallel
+            status_task = rag.doc_status.get_by_id(doc_id)
+            content_task = rag.full_docs.get_by_id(doc_id)
+            
+            doc_status_data, content_data = await asyncio.gather(status_task, content_task)
+            
+            # Check if document exists
+            if not doc_status_data:
+                raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+            
+            # Get content - it might not exist for some documents
+            content = ""
+            if content_data:
+                content = content_data.get("content", "")
+            
+            # Create response
+            return CompleteDocumentResponse(
+                id=doc_id,
+                content=content,
+                content_length=doc_status_data.get("content_length", 0) or 0,
+                status=DocStatus(doc_status_data.get("status", DocStatus.PENDING.value)),
+                created_at=format_datetime(doc_status_data.get("created_at")),
+                updated_at=format_datetime(doc_status_data.get("updated_at")),
+                track_id=doc_status_data.get("track_id"),
+                chunks_count=doc_status_data.get("chunks_count"),
+                error_msg=doc_status_data.get("error_msg"),
+                metadata=doc_status_data.get("metadata", {}) or {},
+                file_path=doc_status_data.get("file_path", "") or "",
+            )
+
+        except HTTPException:
+            # Re-raise HTTP exceptions as-is
+            raise
+        except Exception as e:
+            logger.error(f"Error getting complete document {doc_id}: {str(e)}")
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
