@@ -5,16 +5,15 @@ STORAGE_IMPLEMENTATIONS = {
             "RedisKVStorage",
             "PGKVStorage",
             "MongoKVStorage",
+            "ESKVStorage"
         ],
         "required_methods": ["get_by_id", "upsert"],
     },
     "GRAPH_STORAGE": {
         "implementations": [
             "NetworkXStorage",
-            "Neo4JStorage",
             "PGGraphStorage",
-            "MongoGraphStorage",
-            "MemgraphStorage",
+            "ESGraphStorage"
         ],
         "required_methods": ["upsert_node", "upsert_edge"],
     },
@@ -26,6 +25,7 @@ STORAGE_IMPLEMENTATIONS = {
             "FaissVectorDBStorage",
             "QdrantVectorDBStorage",
             "MongoVectorDBStorage",
+            "ESVectorDBStorage"
             # "ChromaVectorDBStorage",
         ],
         "required_methods": ["query", "upsert"],
@@ -36,6 +36,7 @@ STORAGE_IMPLEMENTATIONS = {
             "RedisDocStatusStorage",
             "PGDocStatusStorage",
             "MongoDocStatusStorage",
+            "ESDocStatusStorage"
         ],
         "required_methods": ["get_docs_by_status"],
     },
@@ -48,11 +49,9 @@ STORAGE_ENV_REQUIREMENTS: dict[str, list[str]] = {
     "MongoKVStorage": [],
     "RedisKVStorage": ["REDIS_URI"],
     "PGKVStorage": ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DATABASE"],
+    "ESKVStorage": ["ES_HOST"],
     # Graph Storage Implementations
     "NetworkXStorage": [],
-    "Neo4JStorage": ["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD"],
-    "MongoGraphStorage": [],
-    "MemgraphStorage": ["MEMGRAPH_URI"],
     "AGEStorage": [
         "AGE_POSTGRES_DB",
         "AGE_POSTGRES_USER",
@@ -76,6 +75,7 @@ STORAGE_ENV_REQUIREMENTS: dict[str, list[str]] = {
     "RedisDocStatusStorage": ["REDIS_URI"],
     "PGDocStatusStorage": ["POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DATABASE"],
     "MongoDocStatusStorage": [],
+    "ESDocStatusStorage": ["ES_HOST"],
 }
 
 # Storage implementation module mapping
@@ -84,12 +84,7 @@ STORAGES = {
     "JsonKVStorage": ".kg.json_kv_impl",
     "NanoVectorDBStorage": ".kg.nano_vector_db_impl",
     "JsonDocStatusStorage": ".kg.json_doc_status_impl",
-    "Neo4JStorage": ".kg.neo4j_impl",
     "MilvusVectorDBStorage": ".kg.milvus_impl",
-    "MongoKVStorage": ".kg.mongo_impl",
-    "MongoDocStatusStorage": ".kg.mongo_impl",
-    "MongoGraphStorage": ".kg.mongo_impl",
-    "MongoVectorDBStorage": ".kg.mongo_impl",
     "RedisKVStorage": ".kg.redis_impl",
     "RedisDocStatusStorage": ".kg.redis_impl",
     "ChromaVectorDBStorage": ".kg.chroma_impl",
@@ -100,7 +95,10 @@ STORAGES = {
     "PGDocStatusStorage": ".kg.postgres_impl",
     "FaissVectorDBStorage": ".kg.faiss_impl",
     "QdrantVectorDBStorage": ".kg.qdrant_impl",
-    "MemgraphStorage": ".kg.memgraph_impl",
+    "ESKVStorage": ".kg.es_impl",
+    "ESDocStatusStorage": ".kg.es_impl",
+    "ESVectorDBStorage": ".kg.es_impl",
+    "ESGraphStorage": ".kg.es_impl",
 }
 
 

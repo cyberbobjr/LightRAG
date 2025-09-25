@@ -1413,8 +1413,12 @@ async def _merge_edges_then_upsert(
         already_edge = await knowledge_graph_inst.get_edge(src_id, tgt_id)
         # Handle the case where get_edge returns None or missing fields
         if already_edge:
-            # Get weight with default 1.0 if missing
-            already_weights.append(already_edge.get("weight", 1.0))
+            # Get weight with default 1.0 if missing, ensure it's a float
+            weight_value = already_edge.get("weight", 1.0)
+            try:
+                already_weights.append(float(weight_value))
+            except (ValueError, TypeError):
+                already_weights.append(1.0)  # Fallback to default if conversion fails
 
             # Get source_id with empty string default if missing or None
             if already_edge.get("source_id") is not None:
@@ -1442,8 +1446,15 @@ async def _merge_edges_then_upsert(
                     )
                 )
 
-    # Process edges_data with None checks
-    weight = sum([dp["weight"] for dp in edges_data] + already_weights)
+    # Process edges_data with None checks, ensure all weights are floats
+    edges_weights = []
+    for dp in edges_data:
+        try:
+            edges_weights.append(float(dp.get("weight", 1.0)))
+        except (ValueError, TypeError):
+            edges_weights.append(1.0)  # Fallback to default if conversion fails
+
+    weight = sum(edges_weights + already_weights)
 
     # Deduplicate by description, keeping first occurrence
     unique_edges = {}

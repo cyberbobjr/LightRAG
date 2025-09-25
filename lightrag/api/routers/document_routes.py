@@ -5,7 +5,6 @@ This module contains all document-related routes for the LightRAG API.
 import asyncio
 from lightrag.utils import logger, get_pinyin_sort_key
 import aiofiles
-import shutil
 import traceback
 import pipmaster as pm
 from datetime import datetime, timezone
@@ -15,9 +14,7 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
-    File,
     HTTPException,
-    UploadFile,
 )
 from pydantic import BaseModel, Field, field_validator
 
@@ -62,49 +59,6 @@ router = APIRouter(
 temp_prefix = "__tmp__"
 
 
-def sanitize_filename(filename: str, input_dir: Path) -> str:
-    """
-    Sanitize uploaded filename to prevent Path Traversal attacks.
-
-    Args:
-        filename: The original filename from the upload
-        input_dir: The target input directory
-
-    Returns:
-        str: Sanitized filename that is safe to use
-
-    Raises:
-        HTTPException: If the filename is unsafe or invalid
-    """
-    # Basic validation
-    if not filename or not filename.strip():
-        raise HTTPException(status_code=400, detail="Filename cannot be empty")
-
-    # Remove path separators and traversal sequences
-    clean_name = filename.replace("/", "").replace("\\", "")
-    clean_name = clean_name.replace("..", "")
-
-    # Remove control characters and null bytes
-    clean_name = "".join(c for c in clean_name if ord(c) >= 32 and c != "\x7f")
-
-    # Remove leading/trailing whitespace and dots
-    clean_name = clean_name.strip().strip(".")
-
-    # Check if anything is left after sanitization
-    if not clean_name:
-        raise HTTPException(
-            status_code=400, detail="Invalid filename after sanitization"
-        )
-
-    # Verify the final path stays within the input directory
-    try:
-        final_path = (input_dir / clean_name).resolve()
-        if not final_path.is_relative_to(input_dir.resolve()):
-            raise HTTPException(status_code=400, detail="Unsafe filename detected")
-    except (OSError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-
-    return clean_name
 
 
 class ScanResponse(BaseModel):
@@ -1816,67 +1770,6 @@ def create_document_routes(
             track_id=track_id,
         )
 
-    @router.post(
-        "/upload", response_model=InsertResponse, dependencies=[Depends(combined_auth)]
-    )
-    async def upload_to_input_dir(
-        background_tasks: BackgroundTasks, file: UploadFile = File(...)
-    ):
-        """
-        Upload a file to the input directory and index it.
-
-        This API endpoint accepts a file through an HTTP POST request, checks if the
-        uploaded file is of a supported type, saves it in the specified input directory,
-        indexes it for retrieval, and returns a success status with relevant details.
-
-        Args:
-            background_tasks: FastAPI BackgroundTasks for async processing
-            file (UploadFile): The file to be uploaded. It must have an allowed extension.
-
-        Returns:
-            InsertResponse: A response object containing the upload status and a message.
-                status can be "success", "duplicated", or error is thrown.
-
-        Raises:
-            HTTPException: If the file type is not supported (400) or other errors occur (500).
-        """
-        try:
-            # Sanitize filename to prevent Path Traversal attacks
-            safe_filename = sanitize_filename(file.filename, doc_manager.input_dir)
-
-            if not doc_manager.is_supported_file(safe_filename):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Unsupported file type. Supported types: {doc_manager.supported_extensions}",
-                )
-
-            file_path = doc_manager.input_dir / safe_filename
-            # Check if file already exists
-            if file_path.exists():
-                return InsertResponse(
-                    status="duplicated",
-                    message=f"File '{safe_filename}' already exists in the input directory.",
-                    track_id="",
-                )
-
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-
-            track_id = generate_track_id("upload")
-
-            # Add to background tasks and get track_id
-            background_tasks.add_task(pipeline_index_file, rag, file_path, track_id)
-
-            return InsertResponse(
-                status="success",
-                message=f"File '{safe_filename}' uploaded successfully. Processing will continue in background.",
-                track_id=track_id,
-            )
-
-        except Exception as e:
-            logger.error(f"Error /documents/upload: {file.filename}: {str(e)}")
-            logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e))
 
     @router.post(
         "/text", response_model=InsertResponse, dependencies=[Depends(combined_auth)]
