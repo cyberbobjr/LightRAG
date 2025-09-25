@@ -1,0 +1,77 @@
+services:
+  opensearch:
+    image: opensearchproject/opensearch:2.19.3
+    container_name: opensearch
+    environment:
+      - cluster.name=opensearch-cluster
+      - node.name=opensearch
+      - discovery.seed_hosts=opensearch
+      - cluster.initial_cluster_manager_nodes=opensearch
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "DISABLE_INSTALL_DEMO_CONFIG=true"
+      - "DISABLE_SECURITY_PLUGIN=true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    networks:
+      - lightrag-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  lightrag:
+    container_name: lightrag
+    image: ghcr.io/hkuds/lightrag:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      tags:
+        - ghcr.io/hkuds/lightrag:latest
+    ports:
+      - "${PORT:-9621}:9621"
+    volumes:
+      - ./data/rag_storage:/app/data/rag_storage
+      - ./data/inputs:/app/data/inputs
+      - ./data/tiktoken:/app/data/tiktoken
+      - ./config.ini:/app/config.ini
+      - ./.env:/app/.env
+    env_file:
+      - .env
+    environment:
+      - TIKTOKEN_CACHE_DIR=/app/data/tiktoken
+      - ES_HOST=http://opensearch:9200
+      - ES_VERIFY_CERTS=false
+      - ES_USE_SSL=false
+      # Configuration pour utiliser OpenSearch comme backend
+      - LIGHTRAG_KV_STORAGE=ESKVStorage
+      - LIGHTRAG_VECTOR_STORAGE=ESVectorDBStorage
+      - LIGHTRAG_DOC_STATUS_STORAGE=ESDocStatusStorage
+      - LIGHTRAG_GRAPH_STORAGE=ESGraphStorage
+    restart: unless-stopped
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks:
+      - lightrag-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  opensearch-data:
+
+networks:
+  lightrag-network:
+    driver: bridge

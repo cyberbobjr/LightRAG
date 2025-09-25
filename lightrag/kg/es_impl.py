@@ -102,25 +102,44 @@ class ESClientManager:
 
     @classmethod
     async def create_index_if_not_exist(
-        cls, index_name: str, mapping: Dict[str, Any]
+        cls, index_name: str, mapping: Dict[str, Any], max_retries: int = 3, retry_delay: float = 5.0
     ) -> None:
         """
         Asynchronously create an OpenSearch index if it doesn't exist.
+        Includes retry logic for connection issues.
 
         Args:
             index_name: Name of the index to create.
             mapping: Dictionary defining the index mapping (schema).
+            max_retries: Maximum number of connection retry attempts.
+            retry_delay: Delay between retry attempts in seconds.
         """
         safe_index_name = cls._sanitize_index_name(index_name)
+        
+        for attempt in range(max_retries + 1):
+            try:
+                client = await cls.get_client()
 
-        client = await cls.get_client()
-
-        # Check if the index exists asynchronously
-        exists = await client.indices.exists(index=safe_index_name)
-        if not exists:
-            # Create the index asynchronously if it does not exist
-            await client.indices.create(index=safe_index_name, body=mapping)
-            logger.info(f"Created index: {index_name}")
+                # Check if the index exists asynchronously
+                exists = await client.indices.exists(index=safe_index_name)
+                if not exists:
+                    # Create the index asynchronously if it does not exist
+                    await client.indices.create(index=safe_index_name, body=mapping)
+                    logger.info(f"Created index: {index_name}")
+                return  # Success, exit the retry loop
+                
+            except (ConnectionError, TransportError) as e:
+                if attempt == max_retries:
+                    logger.error(f"Failed to connect to OpenSearch after {max_retries + 1} attempts: {str(e)}")
+                    raise ConnectionError(f"Cannot establish connection to OpenSearch at {os.environ.get('ES_HOST', 'http://localhost:9200')}. "
+                                        f"Please ensure OpenSearch is running and accessible. Original error: {str(e)}")
+                else:
+                    logger.warning(f"Connection attempt {attempt + 1}/{max_retries + 1} failed: {str(e)}. "
+                                 f"Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+            except Exception as e:
+                logger.error(f"Unexpected error during index creation: {str(e)}")
+                raise
 
 
 @final
@@ -161,12 +180,27 @@ class ESKVStorage(BaseKVStorage):
         """
         Initialize the KV storage. Retrieves the OpenSearch client and creates the index
         with appropriate mapping if it doesn't exist.
+        Implements robust error handling with connection retries.
         """
-        if self.es_client is None:
-            self.es_client = await ESClientManager.get_client()
+        try:
+            if self.es_client is None:
+                self.es_client = await ESClientManager.get_client()
 
-        kv_mapping = self.get_index_mapping()
-        await ESClientManager.create_index_if_not_exist(self.index_name, kv_mapping)
+            kv_mapping = self.get_index_mapping()
+            await ESClientManager.create_index_if_not_exist(self.index_name, kv_mapping)
+            logger.info(f"Successfully initialized ESKVStorage for index: {self.index_name}")
+            
+        except (ConnectionError, TransportError) as e:
+            error_msg = (f"Failed to initialize ESKVStorage: Cannot connect to OpenSearch at "
+                        f"{os.environ.get('ES_HOST', 'http://localhost:9200')}. "
+                        f"Please verify that OpenSearch is running and accessible. "
+                        f"Error: {str(e)}")
+            logger.error(error_msg)
+            raise ConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error during ESKVStorage initialization: {str(e)}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
 
     async def finalize(self):
         """
@@ -508,14 +542,29 @@ class ESDocStatusStorage(DocStatusStorage):
         """
         Initialize the document status storage. Retrieves the OpenSearch client and creates
         the index with appropriate mapping if it doesn't exist.
+        Implements robust error handling with connection retries.
         """
-        if self.es_client is None:
-            self.es_client = await ESClientManager.get_client()
+        try:
+            if self.es_client is None:
+                self.es_client = await ESClientManager.get_client()
 
-        doc_status_mapping = self.get_index_mapping()
-        await ESClientManager.create_index_if_not_exist(
-            self.index_name, doc_status_mapping
-        )
+            doc_status_mapping = self.get_index_mapping()
+            await ESClientManager.create_index_if_not_exist(
+                self.index_name, doc_status_mapping
+            )
+            logger.info(f"Successfully initialized ESDocStatusStorage for index: {self.index_name}")
+            
+        except (ConnectionError, TransportError) as e:
+            error_msg = (f"Failed to initialize ESDocStatusStorage: Cannot connect to OpenSearch at "
+                        f"{os.environ.get('ES_HOST', 'http://localhost:9200')}. "
+                        f"Please verify that OpenSearch is running and accessible. "
+                        f"Error: {str(e)}")
+            logger.error(error_msg)
+            raise ConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error during ESDocStatusStorage initialization: {str(e)}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
 
     async def finalize(self):
         """
@@ -966,30 +1015,48 @@ class ESVectorDBStorage(BaseVectorStorage):
         """
         Initialize the vector storage. Retrieves the OpenSearch client and creates
         the vector index with dense vector mapping if it doesn't exist.
+        Implements robust error handling with connection retries.
         """
-        if self.es_client is None:
-            self.es_client = await ESClientManager.get_client()
-
-        # Check if index exists and has correct mapping
         try:
-            exists = await self.es_client.indices.exists(index=self.index_name)
-            if exists:
-                # Check if vector field has correct knn_vector type
-                mapping = await self.es_client.indices.get_mapping(index=self.index_name)
-                current_mapping = mapping[self.index_name]["mappings"]["properties"]
-                vector_field = current_mapping.get("vector", {})
+            if self.es_client is None:
+                self.es_client = await ESClientManager.get_client()
 
-                # If vector field is not knn_vector type, recreate index
-                if vector_field.get("type") != "knn_vector":
-                    logger.warning(f"Index {self.index_name} has incorrect vector mapping. Recreating...")
-                    await self.drop()
-                    return  # drop() already recreates the index
+            # Check if index exists and has correct mapping
+            try:
+                exists = await self.es_client.indices.exists(index=self.index_name)
+                if exists:
+                    # Check if vector field has correct knn_vector type
+                    mapping = await self.es_client.indices.get_mapping(index=self.index_name)
+                    current_mapping = mapping[self.index_name]["mappings"]["properties"]
+                    vector_field = current_mapping.get("vector", {})
 
+                    # If vector field is not knn_vector type, recreate index
+                    if vector_field.get("type") != "knn_vector":
+                        logger.warning(f"Index {self.index_name} has incorrect vector mapping. Recreating...")
+                        await self.drop()
+                        return  # drop() already recreates the index
+
+            except (ConnectionError, TransportError):
+                # Let connection errors bubble up to be handled by the outer try-catch
+                raise
+            except Exception as e:
+                logger.warning(f"Could not check index mapping: {e}")
+
+            vector_mapping = self.get_index_mapping()
+            await ESClientManager.create_index_if_not_exist(self.index_name, vector_mapping)
+            logger.info(f"Successfully initialized ESVectorDBStorage for index: {self.index_name}")
+            
+        except (ConnectionError, TransportError) as e:
+            error_msg = (f"Failed to initialize ESVectorDBStorage: Cannot connect to OpenSearch at "
+                        f"{os.environ.get('ES_HOST', 'http://localhost:9200')}. "
+                        f"Please verify that OpenSearch is running and accessible. "
+                        f"Error: {str(e)}")
+            logger.error(error_msg)
+            raise ConnectionError(error_msg) from e
         except Exception as e:
-            logger.warning(f"Could not check index mapping: {e}")
-
-        vector_mapping = self.get_index_mapping()
-        await ESClientManager.create_index_if_not_exist(self.index_name, vector_mapping)
+            error_msg = f"Unexpected error during ESVectorDBStorage initialization: {str(e)}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
 
     async def finalize(self):
         """
@@ -1459,16 +1526,31 @@ class ESGraphStorage(BaseGraphStorage):
         """
         Initialize the graph storage. Retrieves the OpenSearch client and creates
         the nodes and edges indices with appropriate mappings if they don't exist.
+        Implements robust error handling with connection retries.
         """
-        if self.es_client is None:
-            self.es_client = await ESClientManager.get_client()
+        try:
+            if self.es_client is None:
+                self.es_client = await ESClientManager.get_client()
 
-        # Create mappings for nodes and edges indices
-        nodes_mapping = self._get_nodes_index_mapping()
-        edges_mapping = self._get_edges_index_mapping()
+            # Create mappings for nodes and edges indices
+            nodes_mapping = self._get_nodes_index_mapping()
+            edges_mapping = self._get_edges_index_mapping()
 
-        await ESClientManager.create_index_if_not_exist(self.nodes_index_name, nodes_mapping)
-        await ESClientManager.create_index_if_not_exist(self.edges_index_name, edges_mapping)
+            await ESClientManager.create_index_if_not_exist(self.nodes_index_name, nodes_mapping)
+            await ESClientManager.create_index_if_not_exist(self.edges_index_name, edges_mapping)
+            logger.info(f"Successfully initialized ESGraphStorage for indices: {self.nodes_index_name}, {self.edges_index_name}")
+            
+        except (ConnectionError, TransportError) as e:
+            error_msg = (f"Failed to initialize ESGraphStorage: Cannot connect to OpenSearch at "
+                        f"{os.environ.get('ES_HOST', 'http://localhost:9200')}. "
+                        f"Please verify that OpenSearch is running and accessible. "
+                        f"Error: {str(e)}")
+            logger.error(error_msg)
+            raise ConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error during ESGraphStorage initialization: {str(e)}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
 
     async def finalize(self):
         """
