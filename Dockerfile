@@ -41,7 +41,7 @@ LABEL org.opencontainers.image.version="${LIGHTRAG_VERSION}"
 WORKDIR /app
 
 # Upgrade pip and setuptools
-RUN pip install --upgrade pip setuptools wheel opensearch-py
+RUN pip install --upgrade pip setuptools wheel opensearch-py==3.0.0
 
 # Copy only necessary files from builder
 COPY --from=builder /root/.local /root/.local

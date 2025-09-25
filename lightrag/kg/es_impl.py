@@ -57,7 +57,7 @@ class ESClientManager:
                 # Si verify_certs est False et que l'URL est HTTPS, la convertir en HTTP
                 if not verify_certs and es_host.startswith("https://"):
                     es_host = es_host.replace("https://", "http://")
-                    print(f"SSL bypassed: Converting URL to HTTP: {es_host}")
+                    logger.info(f"SSL bypassed: Converting URL to HTTP: {es_host}")
 
                 # Configuration du client OpenSearch pour version 2.19.3
                 client_config = {
