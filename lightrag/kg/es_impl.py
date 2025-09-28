@@ -213,19 +213,21 @@ class ESKVStorage(BaseKVStorage):
     def _flatten_es_doc(self, doc: Dict[str, Any]) -> Dict[str, Any]:
         """
         Flatten an OpenSearch document response into a simplified dictionary.
-        Extracts document ID and metadata fields from the source, flattening metadata
-        at root level for consistency with JsonKVStorage.
+        Mirrors PostgreSQL structure where content and other fields are at root level,
+        with metadata in separate 'meta' field.
 
         Args:
             doc: OpenSearch document response (including '_id' and '_source').
 
         Returns:
-            Flattened dictionary containing '_id', 'id', timestamps, and metadata fields at root level.
+            Flattened dictionary containing '_id', 'id', 'content', timestamps, and metadata fields at root level.
         """
         source = doc["_source"]
         result = {
             "_id": doc["_id"],  # Add _id explicitly for consistency with JsonKVStorage
             "id": doc["_id"],   # Keep id for backward compatibility
+            "workspace": source.get("workspace", ""),  # Include workspace like PostgreSQL
+            "content": source.get("content", ""),  # Content at root level like PostgreSQL
             "create_time": source.get("create_time", 0),  # Default value for old data
             "update_time": source.get("update_time", 0),  # Default value for old data
             **source.get("meta", {}),  # Flatten metadata at root level
@@ -367,11 +369,14 @@ class ESKVStorage(BaseKVStorage):
             # Add _id field like JsonKVStorage
             v["_id"] = k
 
-            # Extract metadata (exclude reserved fields)
+            # Extract content and metadata like PostgreSQL structure
+            content = v.get("content", "")  # content at root level
+
+            # Extract metadata (exclude reserved fields and content)
             meta_data = {
                 key: value
                 for key, value in v.items()
-                if key not in ["_id", "id", "create_time", "update_time"]
+                if key not in ["_id", "id", "workspace", "content", "create_time", "update_time"]
             }
 
             # Prepare bulk action: update if exists, insert (upsert) if not
@@ -380,11 +385,15 @@ class ESKVStorage(BaseKVStorage):
                 "_index": self.index_name,
                 "_id": k,
                 "doc": {
+                    "workspace": self.workspace,  # Add workspace like PostgreSQL
+                    "content": content,  # Content at root level like PostgreSQL
                     "update_time": v["update_time"],
                     "meta": meta_data,
                 },
                 "upsert": {
                     "id": k,
+                    "workspace": self.workspace,  # Add workspace like PostgreSQL
+                    "content": content,  # Content at root level like PostgreSQL
                     "create_time": v.get("create_time", current_time),
                     "update_time": v["update_time"],
                     "meta": meta_data,
@@ -490,7 +499,7 @@ class ESKVStorage(BaseKVStorage):
     def get_index_mapping(self) -> Dict[str, Any]:
         """
         Define the OpenSearch index mapping for the KV storage.
-        Enforces strict dynamic mapping and defines core fields.
+        Mirrors PostgreSQL table structure with workspace, content at root level.
 
         Returns:
             Dictionary specifying the index mapping.
@@ -500,6 +509,8 @@ class ESKVStorage(BaseKVStorage):
                 "dynamic": "strict",
                 "properties": {
                     "id": {"type": "keyword"},
+                    "workspace": {"type": "keyword"},  # Add workspace field like PostgreSQL
+                    "content": {"type": "text"},  # Add content field at root level like PostgreSQL
                     "create_time": {"type": "long"},
                     "update_time": {"type": "long"},
                     "meta": {"type": "object", "dynamic": True},
@@ -634,6 +645,7 @@ class ESDocStatusStorage(DocStatusStorage):
     async def upsert(self, data: Dict[str, Dict[str, Any]]) -> None:
         """
         Insert or update document status data in bulk. Ensures 'chunks_list' is a list of strings.
+        Adds workspace field like PostgreSQL implementation.
 
         Args:
             data: Dictionary where keys are document IDs and values are status metadata.
@@ -651,6 +663,10 @@ class ESDocStatusStorage(DocStatusStorage):
                     doc_data["chunks_list"] = [str(doc_data["chunks_list"])]
                 else:
                     doc_data["chunks_list"] = []
+
+            # Add workspace field like PostgreSQL
+            doc_data["workspace"] = self.workspace
+            doc_data["id"] = doc_id  # Ensure id field is present
 
             # logger.info(f"Upserting doc {doc_id}: {doc_data}")
 
@@ -919,7 +935,7 @@ class ESDocStatusStorage(DocStatusStorage):
     def get_index_mapping(self) -> Dict[str, Any]:
         """
         Define the OpenSearch index mapping for document status storage.
-        Specifies field types for status tracking (e.g., dates, counts, lists).
+        Mirrors PostgreSQL table structure with workspace field.
 
         Returns:
             Dictionary specifying the index mapping.
@@ -928,6 +944,7 @@ class ESDocStatusStorage(DocStatusStorage):
             "mappings": {
                 "properties": {
                     "id": {"type": "keyword"},
+                    "workspace": {"type": "keyword"},  # Add workspace field like PostgreSQL
                     "status": {
                         "type": "keyword"  # Exact matches for status filtering
                     },
@@ -1115,9 +1132,10 @@ class ESVectorDBStorage(BaseVectorStorage):
             else:
                 file_paths = [file_path] if file_path else []
 
-            # Construct document with vector, timestamps, and allowed metadata
+            # Construct document with vector, timestamps, workspace, and allowed metadata
             doc = {
                 "id": doc_id,
+                "workspace": self.workspace,  # Add workspace like PostgreSQL
                 "vector": embeddings[i].tolist(),  # Convert numpy array to list
                 "created_at": current_time,
                 "chunk_ids": chunk_ids,  # Store as array like PostgreSQL
@@ -1351,6 +1369,7 @@ class ESVectorDBStorage(BaseVectorStorage):
 
             return {
                 "id": result["_id"],
+                "workspace": result["_source"].get("workspace", ""),  # Include workspace
                 "created_at": result["_source"].get("created_at"),
                 **result["_source"]["meta"],  # Include metadata
             }
@@ -1386,6 +1405,7 @@ class ESVectorDBStorage(BaseVectorStorage):
                     results.append(
                         {
                             "id": doc["_id"],
+                            "workspace": doc["_source"].get("workspace", ""),
                             "created_at": doc["_source"].get("created_at"),
                             **doc["_source"]["meta"],
                         }
@@ -1468,6 +1488,7 @@ class ESVectorDBStorage(BaseVectorStorage):
                 "dynamic": "strict",  # Prevent dynamic addition of new fields
                 "properties": {
                     "id": {"type": "keyword"},  # Document ID (exact matches)
+                    "workspace": {"type": "keyword"},  # Add workspace field like PostgreSQL
                     "vector": {
                         "type": "knn_vector",
                         "dimension": self.embedding_dim,  # Dimension of the vector
@@ -1563,13 +1584,14 @@ class ESGraphStorage(BaseGraphStorage):
     def _get_nodes_index_mapping(self) -> Dict[str, Any]:
         """
         Define the OpenSearch index mapping for graph nodes.
-        Includes node ID, properties, and metadata for efficient queries.
+        Mirrors PostgreSQL structure with workspace field.
         """
         return {
             "mappings": {
                 "dynamic": "strict",
                 "properties": {
                     "entity_id": {"type": "keyword"},  # Node unique identifier
+                    "workspace": {"type": "keyword"},  # Add workspace field like PostgreSQL
                     "entity_name": {"type": "text", "analyzer": "standard"},  # Searchable name
                     "entity_type": {"type": "keyword"},  # Node type/label
                     "description": {"type": "text", "analyzer": "standard"},  # Node description
@@ -1584,7 +1606,7 @@ class ESGraphStorage(BaseGraphStorage):
     def _get_edges_index_mapping(self) -> Dict[str, Any]:
         """
         Define the OpenSearch index mapping for graph edges.
-        Includes source/target nodes, relationship properties, and weights.
+        Mirrors PostgreSQL structure with workspace field.
         """
         return {
             "mappings": {
@@ -1592,6 +1614,7 @@ class ESGraphStorage(BaseGraphStorage):
                 "properties": {
                     "source_entity_id": {"type": "keyword"},  # Source node ID
                     "target_entity_id": {"type": "keyword"},  # Target node ID
+                    "workspace": {"type": "keyword"},  # Add workspace field like PostgreSQL
                     "relation": {"type": "text", "analyzer": "standard"},  # Relationship description
                     "keywords": {"type": "text", "analyzer": "standard"},  # Relationship keywords
                     "weight": {"type": "float"},  # Edge weight/strength
@@ -1612,6 +1635,9 @@ class ESGraphStorage(BaseGraphStorage):
     async def has_node(self, node_id: str) -> bool:
         """Check if a node exists in the graph."""
         try:
+            if self.es_client is None:
+                logger.error("ESGraphStorage not initialized - es_client is None")
+                return False
             result = await self.es_client.exists(index=self.nodes_index_name, id=node_id)
             return bool(result)
         except Exception as e:
@@ -1621,6 +1647,9 @@ class ESGraphStorage(BaseGraphStorage):
     async def has_edge(self, source_node_id: str, target_node_id: str) -> bool:
         """Check if an edge exists between two nodes."""
         try:
+            if self.es_client is None:
+                logger.error("ESGraphStorage not initialized - es_client is None")
+                return False
             edge_id = self._generate_edge_id(source_node_id, target_node_id)
             result = await self.es_client.exists(index=self.edges_index_name, id=edge_id)
             return bool(result)
@@ -1631,6 +1660,9 @@ class ESGraphStorage(BaseGraphStorage):
     async def node_degree(self, node_id: str) -> int:
         """Get the degree (number of connected edges) of a node."""
         try:
+            if self.es_client is None:
+                logger.error("ESGraphStorage not initialized - es_client is None")
+                return 0
             # Query edges where node is either source or target
             query = {
                 "query": {
@@ -1662,6 +1694,9 @@ class ESGraphStorage(BaseGraphStorage):
     async def get_node(self, node_id: str) -> dict[str, str] | None:
         """Get node by its ID, returning only node properties."""
         try:
+            if self.es_client is None:
+                logger.error("ESGraphStorage not initialized - es_client is None")
+                return None
             result = await self.es_client.get(index=self.nodes_index_name, id=node_id)
             if result.get("found", False) or (result.get("_source") is not None):
                 source = result["_source"]
@@ -1672,6 +1707,7 @@ class ESGraphStorage(BaseGraphStorage):
                     "entity_type": source.get("entity_type", ""),
                     "description": source.get("description", ""),
                     "source_id": source.get("source_id", ""),
+                    "created_at": source.get("created_at", ""),
                     **source.get("properties", {}),
                 }
             return None
@@ -1683,9 +1719,12 @@ class ESGraphStorage(BaseGraphStorage):
 
     async def get_edge(
         self, source_node_id: str, target_node_id: str
-    ) -> dict[str, str] | None:
+    ) -> dict[str, Any] | None:
         """Get edge properties between two nodes."""
         try:
+            if self.es_client is None:
+                logger.error("ESGraphStorage not initialized - es_client is None")
+                return None
             edge_id = self._generate_edge_id(source_node_id, target_node_id)
             result = await self.es_client.get(index=self.edges_index_name, id=edge_id)
             if result.get("found", False) or (result.get("_source") is not None):
@@ -1709,6 +1748,9 @@ class ESGraphStorage(BaseGraphStorage):
     async def get_node_edges(self, source_node_id: str) -> list[tuple[str, str]] | None:
         """Get all edges connected to a node."""
         try:
+            if self.es_client is None:
+                logger.error("ESGraphStorage not initialized - es_client is None")
+                return None
             query = {
                 "query": {
                     "bool": {
@@ -1747,6 +1789,9 @@ class ESGraphStorage(BaseGraphStorage):
             return []
 
         try:
+            if self.es_client is None:
+                logger.error("ESGraphStorage not initialized - es_client is None")
+                return []
             query = {
                 "query": {
                     "terms": {"source_id": chunk_ids}
@@ -1780,6 +1825,9 @@ class ESGraphStorage(BaseGraphStorage):
             return []
 
         try:
+            if self.es_client is None:
+                logger.error("ESGraphStorage not initialized - es_client is None")
+                return []
             query = {
                 "query": {
                     "terms": {"source_id": chunk_ids}
@@ -1811,11 +1859,15 @@ class ESGraphStorage(BaseGraphStorage):
     async def upsert_node(self, node_id: str, node_data: dict[str, str]) -> None:
         """Insert a new node or update an existing node in the graph."""
         try:
+            if self.es_client is None:
+                logger.error("ESGraphStorage not initialized - es_client is None")
+                return
             current_time = int(time.time())
 
-            # Prepare node document with required fields
+            # Prepare node document with required fields including workspace
             doc = {
                 "entity_id": node_id,
+                "workspace": self.workspace,  # Add workspace like PostgreSQL
                 "entity_name": node_data.get("entity_name", ""),
                 "entity_type": node_data.get("entity_type", ""),
                 "description": node_data.get("description", ""),
@@ -1823,7 +1875,7 @@ class ESGraphStorage(BaseGraphStorage):
                 "created_at": current_time,
                 "properties": {k: v for k, v in node_data.items()
                              if k not in ["entity_id", "entity_name", "entity_type",
-                                        "description", "source_id", "created_at"]},
+                                        "description", "source_id", "created_at", "workspace"]},
                 "degree": 0,  # Will be updated when edges are added
             }
 
@@ -1844,13 +1896,17 @@ class ESGraphStorage(BaseGraphStorage):
     ) -> None:
         """Insert a new edge or update an existing edge in the graph."""
         try:
+            if self.es_client is None:
+                logger.error("ESGraphStorage not initialized - es_client is None")
+                return
             current_time = int(time.time())
             edge_id = self._generate_edge_id(source_node_id, target_node_id)
 
-            # Prepare edge document with required fields
+            # Prepare edge document with required fields including workspace
             doc = {
                 "source_entity_id": source_node_id,
                 "target_entity_id": target_node_id,
+                "workspace": self.workspace,  # Add workspace like PostgreSQL
                 "relation": edge_data.get("relation", ""),
                 "keywords": edge_data.get("keywords", ""),
                 "weight": float(edge_data.get("weight", 1.0)),
@@ -1860,7 +1916,7 @@ class ESGraphStorage(BaseGraphStorage):
                 "properties": {k: v for k, v in edge_data.items()
                              if k not in ["source_entity_id", "target_entity_id",
                                         "relation", "keywords", "weight", "source_id",
-                                        "created_at", "edge_id"]},
+                                        "created_at", "edge_id", "workspace"]},
             }
 
             # Upsert the edge document
@@ -1881,6 +1937,9 @@ class ESGraphStorage(BaseGraphStorage):
     async def _update_node_degrees(self, node_ids: list[str]) -> None:
         """Update the degree count for specified nodes."""
         try:
+            if self.es_client is None:
+                logger.error("ESGraphStorage not initialized - es_client is None")
+                return
             for node_id in node_ids:
                 degree = await self.node_degree(node_id)
                 try:
@@ -1990,6 +2049,10 @@ class ESGraphStorage(BaseGraphStorage):
     ) -> KnowledgeGraph:
         """Retrieve a connected subgraph of nodes where the label includes the specified node_label."""
         try:
+            if self.es_client is None:
+                logger.error("ESGraphStorage not initialized - es_client is None")
+                return KnowledgeGraph(nodes=[], edges=[])
+
             # Find nodes with matching label
             query = {
                 "query": {
@@ -2008,22 +2071,37 @@ class ESGraphStorage(BaseGraphStorage):
 
             nodes = []
             node_ids = set()
+            # Map entity_id to internal id for consistency with PostgreSQL
+            entity_to_internal_id = {}
+            internal_id_counter = 1
 
-            # Process found nodes
+            # Process found nodes - create structure similar to PostgreSQL
             for hit in nodes_response["hits"]["hits"]:
                 source = hit["_source"]
                 entity_id = source.get("entity_id", "")
                 node_ids.add(entity_id)
 
+                # Create an internal ID like PostgreSQL does
+                internal_id = str(internal_id_counter)
+                entity_to_internal_id[entity_id] = internal_id
+                internal_id_counter += 1
+
+                # Structure properties like PostgreSQL - all fields in properties
+                properties = {
+                    "entity_id": entity_id,
+                    "entity_name": source.get("entity_name", ""),
+                    "entity_type": source.get("entity_type", ""),
+                    "description": source.get("description", ""),
+                    "source_id": source.get("source_id", ""),
+                    "created_at": source.get("created_at", 0),
+                    "file_path": source.get("source_id", "").replace("<SEP>", "<SEP>"),  # Keep format similar
+                    **source.get("properties", {})
+                }
+
                 nodes.append(KnowledgeGraphNode(
-                    id=entity_id,
-                    labels=[entity_id],
-                    properties={
-                        "entity_name": source.get("entity_name", ""),
-                        "entity_type": source.get("entity_type", ""),
-                        "description": source.get("description", ""),
-                        "source_id": source.get("source_id", "")
-                    }
+                    id=internal_id,  # Use internal ID like PostgreSQL
+                    labels=[entity_id],  # Use entity_id as label
+                    properties=properties
                 ))
 
             # Find edges between these nodes
@@ -2042,25 +2120,37 @@ class ESGraphStorage(BaseGraphStorage):
             edges_response = await self.es_client.search(index=self.edges_index_name, body=edges_query)
 
             edges = []
+            edge_id_counter = 1
+
             for hit in edges_response["hits"]["hits"]:
                 source = hit["_source"]
-                src_id = source.get("source_entity_id", "")
-                tgt_id = source.get("target_entity_id", "")
+                src_entity_id = source.get("source_entity_id", "")
+                tgt_entity_id = source.get("target_entity_id", "")
 
                 # Only include edges between our selected nodes
-                if src_id in node_ids and tgt_id in node_ids:
-                    edge_id = self._generate_edge_id(src_id, tgt_id)
+                if src_entity_id in node_ids and tgt_entity_id in node_ids:
+                    # Use internal IDs for source and target like PostgreSQL
+                    src_internal_id = entity_to_internal_id.get(src_entity_id, src_entity_id)
+                    tgt_internal_id = entity_to_internal_id.get(tgt_entity_id, tgt_entity_id)
+
+                    edge_internal_id = str(edge_id_counter)
+                    edge_id_counter += 1
+
+                    # Structure properties like PostgreSQL
+                    properties = {
+                        "relation": source.get("relation", ""),
+                        "keywords": source.get("keywords", ""),
+                        "weight": source.get("weight", 1.0),
+                        "source_id": source.get("source_id", ""),
+                        **source.get("properties", {})
+                    }
+
                     edges.append(KnowledgeGraphEdge(
-                        id=edge_id,
+                        id=edge_internal_id,  # Use internal ID like PostgreSQL
                         type=source.get("relation", ""),
-                        source=src_id,
-                        target=tgt_id,
-                        properties={
-                            "relation": source.get("relation", ""),
-                            "keywords": source.get("keywords", ""),
-                            "weight": source.get("weight", 1.0),
-                            "source_id": source.get("source_id", "")
-                        }
+                        source=src_internal_id,  # Use internal ID
+                        target=tgt_internal_id,  # Use internal ID
+                        properties=properties
                     ))
 
             return KnowledgeGraph(nodes=nodes, edges=edges)
@@ -2097,11 +2187,14 @@ class ESGraphStorage(BaseGraphStorage):
                     }
                     all_nodes.append(node_data)
 
-                response = await self.es_client.scroll(scroll_id=scroll_id, scroll=scroll)
-                scroll_id = response.get("_scroll_id")
+                if self.es_client is not None:
+                    response = await self.es_client.scroll(scroll_id=scroll_id, scroll=scroll)
+                    scroll_id = response.get("_scroll_id")
+                else:
+                    break
 
             # Clear scroll context
-            if scroll_id:
+            if scroll_id and self.es_client is not None:
                 await self.es_client.clear_scroll(scroll_id=scroll_id)
 
             return all_nodes
@@ -2138,11 +2231,14 @@ class ESGraphStorage(BaseGraphStorage):
                     }
                     all_edges.append(edge_data)
 
-                response = await self.es_client.scroll(scroll_id=scroll_id, scroll=scroll)
-                scroll_id = response.get("_scroll_id")
+                if self.es_client is not None:
+                    response = await self.es_client.scroll(scroll_id=scroll_id, scroll=scroll)
+                    scroll_id = response.get("_scroll_id")
+                else:
+                    break
 
             # Clear scroll context
-            if scroll_id:
+            if scroll_id and self.es_client is not None:
                 await self.es_client.clear_scroll(scroll_id=scroll_id)
 
             return all_edges

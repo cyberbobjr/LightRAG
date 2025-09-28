@@ -580,6 +580,11 @@ async def openai_embed(
         RateLimitError: If the OpenAI API rate limit is exceeded.
         APITimeoutError: If the OpenAI API request times out.
     """
+    logger.debug("===== Entering openai_embed function =====")
+    logger.debug(f"Model: {model}")
+    logger.debug(f"Number of texts: {len(texts)}")
+    logger.debug(f"Texts content: {texts}")
+
     # Create the OpenAI client
     openai_async_client = create_openai_async_client(
         api_key=api_key, base_url=base_url, client_configs=client_configs
