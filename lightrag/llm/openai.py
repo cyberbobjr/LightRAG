@@ -553,6 +553,7 @@ async def nvidia_openai_complete(
         | retry_if_exception_type(APIConnectionError)
         | retry_if_exception_type(APITimeoutError)
     ),
+    before_sleep=lambda retry_state: logger.debug(f"Retrying openai_embed (attempt {retry_state.attempt_number}) due to: {retry_state.outcome.exception()}"),
 )
 async def openai_embed(
     texts: list[str],
@@ -580,10 +581,12 @@ async def openai_embed(
         RateLimitError: If the OpenAI API rate limit is exceeded.
         APITimeoutError: If the OpenAI API request times out.
     """
+    import traceback
     logger.debug("===== Entering openai_embed function =====")
     logger.debug(f"Model: {model}")
     logger.debug(f"Number of texts: {len(texts)}")
     logger.debug(f"Texts content: {texts}")
+    logger.debug(f"Call stack: {traceback.format_stack()[-3:-1]}")
 
     # Create the OpenAI client
     openai_async_client = create_openai_async_client(
